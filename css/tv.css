@@ -1,0 +1,179 @@
+/* ==========================================================================
+   Unipack Ops StreamLine — Floor TV (kiosk display)
+   Monochrome by default; color is used only as a thin per-product
+   identifier bar and for the "urgent" state — nothing decorative.
+   ========================================================================== */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0b0c0f;
+  color: #f2f3f4;
+  font-family: -apple-system, 'Segoe UI', system-ui, Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+.tv-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 44px 40px;
+}
+
+.tv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #26282d;
+}
+
+.tv-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tv-brand-mark {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  background: #f2f3f4;
+  color: #0b0c0f;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.tv-brand-text {
+  font-size: 18px;
+  font-weight: 650;
+}
+.tv-brand-text span {
+  display: block;
+  font-size: 13px;
+  font-weight: 450;
+  color: #8b8f97;
+}
+
+.tv-title { text-align: right; }
+.tv-title h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: #f2f3f4;
+}
+.tv-clock {
+  font-size: 14px;
+  color: #8b8f97;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  align-content: start;
+}
+
+.tv-card {
+  background: #16171b;
+  border: 1px solid #2a2c31;
+  border-left: 4px solid var(--accent, #4a4e57);
+  border-radius: 12px;
+  padding: 28px 30px;
+  animation: tv-pop 0.4s ease;
+}
+
+.tv-card.urgent {
+  border-color: #6b4a2e;
+  border-left-color: var(--accent, #6b4a2e);
+  background: #1a1613;
+}
+
+.tv-card-name {
+  font-size: 15px;
+  font-weight: 650;
+  color: #b7bac0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.tv-card-code {
+  font-size: 12.5px;
+  color: #6b6f77;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 18px;
+}
+
+.tv-card-qty {
+  font-size: 78px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #f7f8f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-card-unit {
+  font-size: 14px;
+  font-weight: 550;
+  color: #8b8f97;
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tv-card-orders {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #26282d;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.tv-order-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: #8b8f97;
+}
+.tv-order-line strong { color: #d5d7db; font-weight: 600; }
+
+.tv-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #6b6f77;
+  text-align: center;
+  gap: 10px;
+}
+.tv-empty h2 { font-size: 26px; color: #d5d7db; margin: 0; font-weight: 600; }
+.tv-empty p { font-size: 15px; margin: 0; }
+
+.tv-footer {
+  margin-top: 26px;
+  text-align: center;
+  color: #55585f;
+  font-size: 12.5px;
+  letter-spacing: 0.03em;
+}
+
+@keyframes tv-pop {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 700px) {
+  .tv-shell { padding: 20px; }
+  .tv-card-qty { font-size: 56px; }
+}

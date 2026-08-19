@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Management Insights — Unipack Ops StreamLine</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app-nav"></div>
+
+<div class="page-wrap">
+  <div class="page-header">
+    <div>
+      <h1>Management Insights</h1>
+      <div class="subtitle">Sales, inventory, and order performance at a glance.</div>
+    </div>
+  </div>
+
+  <div class="grid grid-stats" id="summary-stats"></div>
+
+  <div class="grid grid-2 section-gap">
+    <div class="card">
+      <div class="card-title">Units Sold by Product</div>
+      <div id="chart-sold"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Current Inventory by Product</div>
+      <div id="chart-inventory"></div>
+    </div>
+  </div>
+
+  <div class="grid grid-2 section-gap">
+    <div class="card">
+      <div class="card-title">Order Status Breakdown</div>
+      <div id="chart-orders"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Sales Trend (last 48 hours)</div>
+      <div id="chart-trend"></div>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/management.js"></script>
+</body>
+</html>

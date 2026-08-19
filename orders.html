@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Orders — Unipack Ops StreamLine</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app-nav"></div>
+
+<div class="page-wrap">
+  <div class="page-header">
+    <div>
+      <h1>Customer Orders</h1>
+      <div class="subtitle">Orders pull from inventory first, per item. Anything inventory can't cover is queued straight to the floor TV.</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-title">All Orders</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Items</th>
+              <th>Total Qty</th>
+              <th>From Inventory</th>
+              <th>Queued</th>
+              <th>Status</th>
+              <th>Placed</th>
+            </tr>
+          </thead>
+          <tbody id="orders-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">+ New Order</div>
+
+      <div class="form-group">
+        <label for="customer">Customer</label>
+        <input type="text" id="customer" placeholder="e.g. GreenMart" />
+      </div>
+
+      <div class="form-group">
+        <label>Add Item</label>
+        <div style="display:flex; gap:8px;">
+          <div class="product-picker" id="cart-product-picker" style="flex:1.3;">
+            <input type="text" class="pp-search" id="cart-product-search" placeholder="Search by name or code…" autocomplete="off" />
+            <input type="hidden" class="pp-hidden" id="cart-product" />
+            <div class="pp-panel"></div>
+          </div>
+          <input type="number" id="cart-qty" min="1" placeholder="Qty" style="flex:0.7;" />
+          <button type="button" id="add-to-cart-btn" class="btn btn-outline">Add</button>
+        </div>
+        <div class="form-hint" id="inventory-preview"></div>
+      </div>
+
+      <div class="form-group">
+        <label>Cart</label>
+        <div id="cart-list"><div class="empty-state" style="padding:20px;">Cart is empty — add an item above.</div></div>
+      </div>
+
+      <button type="button" id="place-order-btn" class="btn btn-primary btn-block">Place Order</button>
+    </div>
+  </div>
+
+  <div class="grid grid-2 section-gap">
+    <div class="card">
+      <div class="card-title">Send Restock to Production</div>
+      <div class="form-hint" style="margin-bottom:16px;">Not a sale — pushes a straight production request onto the floor TV. Clears itself once enough new stock is produced and received.</div>
+
+      <div class="form-group">
+        <label for="restock-product-search">Product</label>
+        <div class="product-picker" id="restock-product-picker">
+          <input type="text" class="pp-search" id="restock-product-search" placeholder="Search by name or code…" autocomplete="off" />
+          <input type="hidden" class="pp-hidden" id="restock-product" />
+          <div class="pp-panel"></div>
+        </div>
+        <div class="form-hint" id="restock-inventory-preview"></div>
+      </div>
+      <div class="form-group">
+        <label for="restock-qty">Quantity Needed</label>
+        <input type="number" id="restock-qty" min="1" placeholder="e.g. 100" />
+      </div>
+      <button type="button" id="send-restock-btn" class="btn btn-outline btn-block">Send to Production Queue</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Restock Requests</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Requested</th>
+              <th>Remaining</th>
+              <th>Status</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody id="restock-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="js/data.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/product-picker.js"></script>
+<script src="js/orders.js"></script>
+</body>
+</html>
