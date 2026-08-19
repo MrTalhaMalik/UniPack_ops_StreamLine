@@ -1,0 +1,101 @@
+# Unipack Ops StreamLine
+
+A demo operations system for Unipack: track product from the production floor into inventory, catch the two ways that process usually breaks (stock sold straight off the floor, or reproduced instead of pulled from stock), run a live "what to make next" screen for the factory floor, and route orders through to fulfillment.
+
+Built as a static site — plain HTML, CSS, and JavaScript. No backend, no build step, no dependencies. Data lives in the browser's `localStorage`, seeded with a small demo scenario on first load.
+
+## Running it
+
+Open `index.html` in a browser. That's it.
+
+`localStorage` is scoped per browser profile, so use the same browser to see persisted changes across sessions. If you want a clean slate, log in as Admin and use **Reset Demo Data** on the dashboard.
+
+## Accounts
+
+| Role | Username | Password | Can see |
+|---|---|---|---|
+| Admin | `admin` | `admin123` | Everything |
+| Data Entry | `dataentry` | `entry123` | Only the two count-entry forms — no dashboards, no numbers, no navigation |
+| Fulfillment | `fulfillment` | `fulfill123` | Only the order queue — pick/wait status per item, plus Complete/Shipped actions |
+| Floor TV | — no login — | — | `orders-tv.html` is a public kiosk page, meant to run unattended on a factory-floor screen |
+
+Each account is hard-restricted server-side-of-nothing — i.e. purely client-side route guards in `js/auth.js`. This is a demo; don't reuse this auth approach for anything with real stakes.
+
+## The problem this models
+
+Two things Unipack described going wrong on the floor:
+
+1. **Product skips inventory.** Something gets made, an order shows up, and the finished goods go straight to the customer without ever being counted into inventory.
+2. **Redundant production.** Stock already exists, but instead of pulling from it, the floor produces a fresh batch anyway.
+
+Rather than just prevent these in the UI, the app **tracks them as they happen** and surfaces them as numbers on the dashboard (Anomalies & Compliance) and on the Product Tracking page, so they're visible instead of invisible.
+
+## Pages
+
+- **Dashboard** (`dashboard.html`) — landing page for Admin. Aggregate inventory/queue/anomaly totals, a numeric compliance table, the floor queue, and a recent-activity feed.
+- **Inventory** (`inventory.html`) — exactly one thing: current stock count per product, searchable by name or item code. No pipeline, no charts.
+- **Product Tracking** (`tracking.html`) — pick a product and see its pipeline: Produced → In Transit → Received @ Inventory → In Inventory, plus counts for lost-in-transit, bypassed, and redundant batches.
+- **Orders** (`orders.html`) — build a multi-item cart for a customer order (each line item allocates from inventory independently), and a separate panel to push an internal **restock request** straight to production without it counting as a sale.
+- **Management Insights** (`management.html`) — units sold and inventory by product (top movers), order status breakdown, and a 48-hour sales trend, all rendered with a small hand-built SVG/CSS chart library (`js/charts.js`) — no charting dependency.
+- **Floor TV** (`orders-tv.html`) — kiosk display, no login. Shows only the quantity of each product still needed on top of what inventory already covers (customer orders and internal restock requests are automatically merged into one number), plus the item code.
+- **Data Entry** (`data-entry.html`) — the two paper-slip counts get typed in here: production count, and inventory-received count. Nothing else is visible or reachable from this account.
+- **Fulfillment** (`fulfillment.html`) — per order, shows how much of each item is ready to pick vs. still waiting on production, with **Mark Order Complete** (only enabled once every item is covered) and **Mark Shipped** actions.
+
+## Product catalog
+
+The full product list (66 SKUs, item codes included) comes from `Material List 31-july.xlsx`, grouped into five categories for color-coding and navigation:
+
+- Garbage Bags
+- Laundry Bags & Rolls
+- Foodservice Disposables
+- Shopping & Printing Bags
+- Trash Bags & Table Sheets
+
+The catalog lives in `js/data.js` as `PRODUCT_CATALOG`. The demo seed data only puts activity on a handful of representative SKUs — the rest sit at zero until real data is entered, which is realistic for a fresh rollout.
+
+Every product picker in the app (order cart, restock, production entry) is a searchable type-ahead — search by name or code — built in `js/product-picker.js`, not a plain dropdown.
+
+## How the data model works
+
+Everything is computed from four arrays saved to `localStorage` (`js/data.js`):
+
+- **`batches`** — a production run. Starts `in_transit` when logged on the floor. Becomes `received` once inventory logs its own count against it — and if the two counts don't match, the difference is tracked as shrinkage. A batch can instead be flagged `directIssue` (bypassed inventory entirely) or `possiblyRedundant` (inventory already had stock when it was produced).
+- **`orders`** — a customer order with one or more line items. Each item is allocated from current inventory independently at creation time and again whenever new stock is received; whatever isn't covered becomes a **deficit** that shows up on the Floor TV. Each order also carries its own fulfillment lifecycle (`pending` → `complete` → `shipped`), separate from inventory allocation.
+- **`allocations`** — the ledger of units taken from inventory to cover an order item. `getInventory(product)` is just received-into-stock minus allocations.
+- **`restocks`** — an internal "make more of this" request (not a sale). Shows up on the Floor TV merged with order deficits, and clears itself as new production is received — no inventory or allocation math involved.
+
+Reset the whole thing (and re-seed) with `resetDemoData()`, wired to the **Reset Demo Data** button on the dashboard.
+
+## Design notes
+
+- One neutral gray/ink palette throughout; color is used only to carry meaning (status badges, problem numbers) — never as decoration.
+- No emoji, no icon fonts, no external assets. Product category color-coding is the only "many colors" concession, and it's deliberately muted.
+- The Floor TV screen uses a separate stylesheet (`css/tv.css`) tuned for kiosk visibility from across a room rather than desk use.
+
+## File structure
+
+```
+index.html          Login
+dashboard.html       Admin landing page
+inventory.html        Stock counts only
+tracking.html         Per-product pipeline view
+orders.html            Customer orders (cart) + restock requests
+management.html         Charts: sales, inventory, order status, trend
+orders-tv.html            Floor TV (public, no login)
+data-entry.html             Production / received count entry
+fulfillment.html              Pick-or-wait order queue
+
+css/style.css        Shared design system
+css/tv.css            Floor TV kiosk styles
+
+js/data.js           Product catalog + all state/business logic (localStorage)
+js/auth.js            Accounts, sessions, route guards
+js/nav.js              Shared top navigation (role-aware)
+js/product-picker.js     Searchable product type-ahead
+js/charts.js               Bar / donut / line chart helpers (SVG + CSS, no deps)
+js/dashboard.js, tracking.js, orders.js, orders-tv.js,
+js/data-entry.js, fulfillment.js, inventory.js, management.js
+                              Per-page logic
+
+Material List 31-july.xlsx   Source product list from Unipack
+```
