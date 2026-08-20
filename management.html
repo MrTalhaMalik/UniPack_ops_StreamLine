@@ -17,6 +17,20 @@
     </div>
   </div>
 
+  <div class="filter-bar">
+    <label for="date-from">From</label>
+    <input type="date" id="date-from" style="max-width:160px;" />
+    <label for="date-to">To</label>
+    <input type="date" id="date-to" style="max-width:160px;" />
+    <div style="display:flex; gap:6px;">
+      <button type="button" class="btn btn-outline btn-sm" data-range="7">7d</button>
+      <button type="button" class="btn btn-outline btn-sm" data-range="30">30d</button>
+      <button type="button" class="btn btn-outline btn-sm" data-range="90">90d</button>
+      <button type="button" class="btn btn-outline btn-sm" data-range="all">All Time</button>
+    </div>
+  </div>
+  <div class="form-hint" style="margin:-12px 0 20px;">Sold, orders, and the trend chart are scoped to this range. "Current Inventory" is always the live count.</div>
+
   <div class="grid grid-stats" id="summary-stats"></div>
 
   <div class="grid grid-2 section-gap">
@@ -36,7 +50,7 @@
       <div id="chart-orders"></div>
     </div>
     <div class="card">
-      <div class="card-title">Sales Trend (last 48 hours)</div>
+      <div class="card-title" id="trend-title">Sales Trend</div>
       <div id="chart-trend"></div>
     </div>
   </div>
@@ -46,6 +60,7 @@
 <script src="js/auth.js"></script>
 <script src="js/nav.js"></script>
 <script src="js/charts.js"></script>
+<script src="js/date-range.js"></script>
 <script src="js/management.js"></script>
 </body>
 </html>

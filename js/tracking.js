@@ -6,6 +6,8 @@ requireAuth(['admin']);
 seedIfEmpty();
 renderNav('tracking');
 
+let dateRange = null;
+
 function timeAgo(ts) {
   const diff = Date.now() - ts;
   const mins = Math.round(diff / 60000);
@@ -27,7 +29,7 @@ function flowStepHtml(cls, value, label) {
 }
 
 function renderFlowForProduct(product) {
-  const s = getProductStats(product);
+  const s = getProductStats(product, dateRange);
   const meta = PRODUCT_META[product];
 
   let html = `
@@ -72,11 +74,12 @@ function renderBatchTable(product) {
   const db = loadDB();
   let batches = db.batches.slice().sort((a, b) => b.producedAt - a.producedAt);
   if (product !== '__all__') batches = batches.filter((b) => b.product === product);
+  if (dateRange) batches = batches.filter((b) => inRange(b.producedAt, dateRange));
 
   const tbody = document.getElementById('batch-table-body');
 
   if (batches.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">No batches recorded yet.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">No batches in this range.</div></td></tr>`;
     return;
   }
 
@@ -104,10 +107,10 @@ function renderAll() {
 
   if (product === '__all__') {
     const db = loadDB();
-    const activeProducts = PRODUCTS.filter((p) => db.batches.some((b) => b.product === p));
+    const activeProducts = PRODUCTS.filter((p) => db.batches.some((b) => b.product === p && (!dateRange || inRange(b.producedAt, dateRange))));
     flowMount.innerHTML = activeProducts.length > 0
       ? activeProducts.map(renderFlowForProduct).join('')
-      : `<div class="card"><div class="empty-state">No production activity recorded yet. Pick a product above, or log a batch from Data Entry.</div></div>`;
+      : `<div class="card"><div class="empty-state">No production activity in this range. Try widening the date filter.</div></div>`;
   } else {
     flowMount.innerHTML = renderFlowForProduct(product);
   }
@@ -116,5 +119,5 @@ function renderAll() {
 }
 
 populateFilter();
-renderAll();
+initDateRangeFilter((range) => { dateRange = range; renderAll(); }, 30);
 setInterval(renderAll, 4000);

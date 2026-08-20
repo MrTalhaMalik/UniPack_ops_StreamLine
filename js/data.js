@@ -112,7 +112,7 @@ function productSelectOptionsHtml() {
     .join('');
 }
 
-const STORE_KEY = 'unipack_db_v4';
+const STORE_KEY = 'unipack_db_v5';
 
 function uid(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -140,6 +140,16 @@ function loadDB() {
 
 function saveDB(db) {
   localStorage.setItem(STORE_KEY, JSON.stringify(db));
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+
+/** range: { from: timestamp|null, to: timestamp|null } — null on either side means unbounded. */
+function inRange(ts, range) {
+  if (!range) return true;
+  if (range.from !== null && range.from !== undefined && ts < range.from) return false;
+  if (range.to !== null && range.to !== undefined && ts > range.to) return false;
+  return true;
 }
 
 /* ---------------------------- inventory math ---------------------------- */
@@ -381,11 +391,16 @@ function getTVQueue() {
 
 /* ---------------------------- stats / reporting ---------------------------- */
 
-function getProductStats(product) {
+/**
+ * range (optional): { from, to } — scopes every batch-derived number to batches
+ * *produced* within that window. `available` (current inventory) is always the
+ * live running balance — a date range can't meaningfully filter a running total.
+ */
+function getProductStats(product, range) {
   const db = loadDB();
-  const batches = db.batches
-    .filter((b) => b.product === product)
-    .sort((a, b) => b.producedAt - a.producedAt);
+  let batches = db.batches.filter((b) => b.product === product);
+  if (range) batches = batches.filter((b) => inRange(b.producedAt, range));
+  batches = batches.sort((a, b) => b.producedAt - a.producedAt);
 
   const totalProduced = batches.reduce((s, b) => s + b.qty, 0);
   const inTransit = batches
@@ -402,30 +417,33 @@ function getProductStats(product) {
     .reduce((s, b) => s + b.discrepancy, 0);
   const available = getInventory(product, db);
   const allocated = db.allocations
-    .filter((a) => a.product === product)
+    .filter((a) => a.product === product && (!range || inRange(a.at, range)))
     .reduce((s, a) => s + a.qty, 0);
   const redundantCount = batches.filter((b) => b.possiblyRedundant).length;
 
   return { product, totalProduced, inTransit, bypassedQty, received, lost, available, allocated, redundantCount, batches };
 }
 
-function getAllStats() {
-  return PRODUCTS.map(getProductStats);
+function getAllStats(range) {
+  return PRODUCTS.map((p) => getProductStats(p, range));
 }
 
-function getAnomalies() {
+function getAnomalies(range) {
   const db = loadDB();
-  const bypasses = db.batches.filter((b) => b.directIssue);
-  const redundant = db.batches.filter((b) => b.possiblyRedundant);
-  const discrepant = db.batches.filter((b) => b.status === 'received' && b.discrepancy > 0);
+  let batches = db.batches;
+  if (range) batches = batches.filter((b) => inRange(b.producedAt, range));
+  const bypasses = batches.filter((b) => b.directIssue);
+  const redundant = batches.filter((b) => b.possiblyRedundant);
+  const discrepant = batches.filter((b) => b.status === 'received' && b.discrepancy > 0);
   return { bypasses, redundant, discrepant };
 }
 
-/** Per-product numeric breakdown for the dashboard compliance table — nonzero rows only. */
-function getAnomalyBreakdown() {
+/** Per-product numeric breakdown for the dashboard/tracking compliance table — nonzero rows only. */
+function getAnomalyBreakdown(range) {
   const db = loadDB();
   return PRODUCTS.map((product) => {
-    const batches = db.batches.filter((b) => b.product === product);
+    let batches = db.batches.filter((b) => b.product === product);
+    if (range) batches = batches.filter((b) => inRange(b.producedAt, range));
     const bypassQty = batches.filter((b) => b.directIssue).reduce((s, b) => s + b.qty, 0);
     const redundantBatches = batches.filter((b) => b.possiblyRedundant).length;
     const shrinkageQty = batches
@@ -487,48 +505,72 @@ function getActivityFeed(limit) {
 
 /* ---------------------------- management analytics ---------------------------- */
 
-function getSoldByProduct() {
+function getSoldByProduct(range) {
   const db = loadDB();
   return PRODUCTS.map((product) => ({
     product,
-    qty: db.allocations.filter((a) => a.product === product).reduce((s, a) => s + a.qty, 0),
+    qty: db.allocations
+      .filter((a) => a.product === product && (!range || inRange(a.at, range)))
+      .reduce((s, a) => s + a.qty, 0),
   }));
 }
 
+/** Always the live running balance — not date-filterable without replaying full history. */
 function getInventoryByProduct() {
   return PRODUCTS.map((product) => ({ product, qty: getInventory(product) }));
 }
 
-function getOrderStatusBreakdown() {
+function getOrderStatusBreakdown(range) {
   const db = loadDB();
   const counts = { fulfilled: 0, partial: 0, queued: 0 };
-  db.orders.forEach((o) => { counts[getOrderStatus(o)]++; });
+  db.orders
+    .filter((o) => !range || inRange(o.createdAt, range))
+    .forEach((o) => { counts[getOrderStatus(o)]++; });
   return counts;
 }
 
 /**
- * Units sold, bucketed into 6-hour windows over the last 48 hours.
+ * Units sold, bucketed across the given range (defaults to the last 30 days).
+ * Buckets by day for spans over 3 days, otherwise by 6-hour window.
  */
-function getSalesTrend() {
+function getSalesTrend(range) {
   const db = loadDB();
-  const BUCKET_HOURS = 6;
-  const BUCKET_COUNT = 8;
   const now = Date.now();
+  const to = (range && range.to) || now;
+  const from = (range && range.from) || (to - 30 * DAY_MS);
+  const spanMs = Math.max(DAY_MS, to - from);
 
-  const buckets = new Array(BUCKET_COUNT).fill(0);
+  let bucketMs = spanMs <= 3 * DAY_MS ? 6 * 3600 * 1000 : DAY_MS;
+  let bucketCount = Math.ceil(spanMs / bucketMs);
+  if (bucketCount > 30) {
+    bucketMs = Math.ceil(spanMs / 30 / DAY_MS) * DAY_MS;
+    bucketCount = Math.ceil(spanMs / bucketMs);
+  }
+
+  const buckets = new Array(bucketCount).fill(0);
   db.allocations.forEach((a) => {
-    const hoursAgo = (now - a.at) / 3600000;
-    const idx = BUCKET_COUNT - 1 - Math.floor(hoursAgo / BUCKET_HOURS);
-    if (idx >= 0 && idx < BUCKET_COUNT) buckets[idx] += a.qty;
+    if (a.at < from || a.at > to) return;
+    const idx = Math.min(bucketCount - 1, Math.floor((a.at - from) / bucketMs));
+    buckets[idx] += a.qty;
   });
 
+  const daily = bucketMs >= DAY_MS;
   return buckets.map((qty, i) => {
-    const hoursBeforeNow = (BUCKET_COUNT - 1 - i) * BUCKET_HOURS;
-    return { label: hoursBeforeNow === 0 ? 'Now' : `-${hoursBeforeNow}h`, qty };
+    const bucketStart = from + i * bucketMs;
+    const label = daily
+      ? new Date(bucketStart).toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : new Date(bucketStart).toLocaleTimeString([], { hour: 'numeric' });
+    return { label, qty };
   });
 }
 
-/* ---------------------------- seed data ---------------------------- */
+/* ---------------------------- seed data ----------------------------
+   Two layers: ~7 weeks of randomized-but-deterministic history (so a date
+   filter has real variety to show), plus a hand-authored "today/yesterday"
+   narrative on top (the specific shrinkage/bypass/redundant/queue examples
+   referenced elsewhere in the app). Same PRNG seed every reset, so the
+   demo is reproducible.
+   ---------------------------------------------------------------------- */
 
 function seedIfEmpty() {
   const existing = localStorage.getItem(STORE_KEY);
@@ -545,99 +587,130 @@ function seedIfEmpty() {
   const PLATES = 'ROUND PLATE 220mm';
   const GARBAGE = 'GARBAGE BAGS 90X110 CM 14KG';
   const LAUNDRY = 'LAUNDRY BAG  (60X90CM) 20 KG';
+  const SEED_PRODUCTS = [BAGS, CUPS, PLATES, GARBAGE, LAUNDRY];
 
-  // --- Shopping bags ---
-  const b1 = {
-    id: uid('batch'), product: BAGS, qty: 200, producedBy: 'Floor Worker A',
-    producedAt: t(47), status: 'received', receivedQty: 200, receivedBy: 'Inventory Clerk',
-    receivedAt: t(46), discrepancy: 0, directIssue: false, customer: null, possiblyRedundant: null,
-  };
-  const b6 = {
-    id: uid('batch'), product: BAGS, qty: 50, producedBy: 'Floor Worker A',
-    producedAt: t(2), status: 'in_transit', receivedQty: null, receivedBy: null,
-    receivedAt: null, discrepancy: null, directIssue: false, customer: null, possiblyRedundant: null,
-  };
+  const WORKERS = ['Floor Worker A', 'Floor Worker B', 'Floor Worker C', 'Floor Worker D'];
+  const CLERKS = ['Inventory Clerk', 'Inventory Clerk 2'];
+  const CUSTOMERS = ['GreenMart', 'CityDiner', 'PackRight Distributors', 'EcoBags Retail', 'QuickServe Cafe', 'Metro Wholesale', 'Sunrise Hotel Supply'];
 
-  // --- Cups ---
-  const b2 = {
-    id: uid('batch'), product: CUPS, qty: 150, producedBy: 'Floor Worker B',
-    producedAt: t(40), status: 'received', receivedQty: 145, receivedBy: 'Inventory Clerk',
-    receivedAt: t(39), discrepancy: 5, directIssue: false, customer: null, possiblyRedundant: null,
-  };
-  const b4 = {
-    id: uid('batch'), product: CUPS, qty: 80, producedBy: 'Floor Worker B',
-    producedAt: t(20), status: 'bypassed', receivedQty: null, receivedBy: null,
-    receivedAt: null, discrepancy: null, directIssue: true, customer: 'QuickServe Cafe',
-    possiblyRedundant: { priorInventory: 145 },
-  };
+  // deterministic PRNG so every reset produces the same demo dataset
+  let seed = 20260819;
+  function rand() {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  }
+  function pick(arr) { return arr[Math.floor(rand() * arr.length)]; }
 
-  // --- Plates ---
-  const b3 = {
-    id: uid('batch'), product: PLATES, qty: 100, producedBy: 'Floor Worker C',
-    producedAt: t(36), status: 'received', receivedQty: 100, receivedBy: 'Inventory Clerk',
-    receivedAt: t(35), discrepancy: 0, directIssue: false, customer: null, possiblyRedundant: null,
-  };
-  const b5 = {
-    id: uid('batch'), product: PLATES, qty: 60, producedBy: 'Floor Worker C',
-    producedAt: t(18), status: 'received', receivedQty: 60, receivedBy: 'Inventory Clerk',
-    receivedAt: t(17), discrepancy: 0, directIssue: false, customer: null,
-    possiblyRedundant: { priorInventory: 100 },
-  };
+  const inv = {}; // running received-minus-allocated per product as we generate forward in time
+  SEED_PRODUCTS.forEach((p) => (inv[p] = 0));
 
-  // --- A couple of quiet, uneventful batches so the catalog isn't all zeros ---
-  const b7 = {
-    id: uid('batch'), product: GARBAGE, qty: 300, producedBy: 'Floor Worker D',
-    producedAt: t(10), status: 'received', receivedQty: 300, receivedBy: 'Inventory Clerk',
-    receivedAt: t(9), discrepancy: 0, directIssue: false, customer: null, possiblyRedundant: null,
-  };
-  const b8 = {
-    id: uid('batch'), product: LAUNDRY, qty: 150, producedBy: 'Floor Worker D',
-    producedAt: t(8), status: 'received', receivedQty: 150, receivedBy: 'Inventory Clerk',
-    receivedAt: t(7), discrepancy: 0, directIssue: false, customer: null, possiblyRedundant: null,
-  };
+  function addBatch(product, qty, producedAt, opts) {
+    opts = opts || {};
+    const priorInventory = inv[product];
+    const batch = {
+      id: uid('batch'), product, qty, producedBy: opts.producedBy || pick(WORKERS), producedAt,
+      status: opts.directIssue ? 'bypassed' : (opts.inTransit ? 'in_transit' : 'received'),
+      receivedQty: null, receivedBy: null, receivedAt: null, discrepancy: null,
+      directIssue: !!opts.directIssue,
+      customer: opts.directIssue ? (opts.customer || pick(CUSTOMERS)) : null,
+      possiblyRedundant: priorInventory > 0 ? { priorInventory } : null,
+    };
+    if (!opts.directIssue && !opts.inTransit) {
+      const shortBy = opts.shortBy || 0;
+      batch.receivedQty = qty - shortBy;
+      batch.receivedBy = opts.receivedBy || pick(CLERKS);
+      batch.receivedAt = producedAt + (opts.receiveDelayMs || 50 * 60 * 1000);
+      batch.discrepancy = shortBy;
+      inv[product] += batch.receivedQty;
+    }
+    db.batches.push(batch);
+    return batch;
+  }
 
-  db.batches.push(b1, b6, b2, b4, b3, b5, b7, b8);
+  function addOrder(customer, items, createdAt, fulfillment) {
+    const order = {
+      id: uid('order'), customer, createdAt, createdBy: 'Admin',
+      items: items.map((it) => ({ id: uid('item'), product: it.product, qty: it.qty, remaining: it.qty, status: 'queued' })),
+      fulfillment: fulfillment || { status: 'pending', completedAt: null, completedBy: null, shippedAt: null, shippedBy: null },
+    };
+    order.items.forEach((item) => {
+      const take = Math.min(inv[item.product], item.remaining);
+      if (take > 0) {
+        db.allocations.push({ id: uid('alloc'), orderId: order.id, itemId: item.id, product: item.product, qty: take, at: createdAt });
+        inv[item.product] -= take;
+        item.remaining -= take;
+        item.status = item.remaining === 0 ? 'fulfilled' : 'partial';
+      }
+    });
+    db.orders.push(order);
+    return order;
+  }
 
-  // --- Orders (o4 demonstrates a multi-item cart: bags + plates in one order) ---
-  const o1 = {
-    id: uid('order'), customer: 'GreenMart', createdAt: t(30), createdBy: 'Admin',
-    items: [{ id: uid('item'), product: BAGS, qty: 120, remaining: 0, status: 'fulfilled' }],
-    fulfillment: { status: 'shipped', completedAt: t(29), completedBy: 'Admin', shippedAt: t(28), shippedBy: 'Admin' },
-  };
-  const o2 = {
-    id: uid('order'), customer: 'CityDiner', createdAt: t(3), createdBy: 'Admin',
-    items: [{ id: uid('item'), product: CUPS, qty: 200, remaining: 55, status: 'partial' }],
-    fulfillment: { status: 'pending', completedAt: null, completedBy: null, shippedAt: null, shippedBy: null },
-  };
-  const o3 = {
-    id: uid('order'), customer: 'PackRight Distributors', createdAt: t(1), createdBy: 'Admin',
-    items: [{ id: uid('item'), product: PLATES, qty: 30, remaining: 0, status: 'fulfilled' }],
-    fulfillment: { status: 'complete', completedAt: t(0.8), completedBy: 'Admin', shippedAt: null, shippedBy: null },
-  };
-  const o4 = {
-    id: uid('order'), customer: 'EcoBags Retail', createdAt: t(0.5), createdBy: 'Admin',
-    items: [
-      { id: uid('item'), product: BAGS, qty: 100, remaining: 20, status: 'partial' },
-      { id: uid('item'), product: PLATES, qty: 40, remaining: 0, status: 'fulfilled' },
-    ],
-    fulfillment: { status: 'pending', completedAt: null, completedBy: null, shippedAt: null, shippedBy: null },
-  };
+  function addRestock(product, qty, requestedBy, createdAt) {
+    db.restocks.push({ id: uid('restock'), product, qty, remaining: qty, requestedBy, createdAt, status: 'queued' });
+  }
 
-  const a1 = { id: uid('alloc'), orderId: o1.id, itemId: o1.items[0].id, product: BAGS, qty: 120, at: t(30) };
-  const a2 = { id: uid('alloc'), orderId: o2.id, itemId: o2.items[0].id, product: CUPS, qty: 145, at: t(3) };
-  const a3 = { id: uid('alloc'), orderId: o3.id, itemId: o3.items[0].id, product: PLATES, qty: 30, at: t(1) };
-  const a4 = { id: uid('alloc'), orderId: o4.id, itemId: o4.items[0].id, product: BAGS, qty: 80, at: t(0.5) };
-  const a5 = { id: uid('alloc'), orderId: o4.id, itemId: o4.items[1].id, product: PLATES, qty: 40, at: t(0.5) };
+  // --- ~7 weeks of history: routine production, orders, and the occasional anomaly ---
+  for (let daysAgo = 50; daysAgo >= 3; daysAgo--) {
+    const dayStart = now - daysAgo * DAY_MS;
 
-  db.orders.push(o1, o2, o3, o4);
-  db.allocations.push(a1, a2, a3, a4, a5);
+    SEED_PRODUCTS.forEach((product) => {
+      if (rand() < 0.30) {
+        const producedAt = dayStart + Math.floor(7 + rand() * 9) * H;
+        const qty = 60 + Math.floor(rand() * 220);
+        const roll = rand();
+        if (roll < 0.08) {
+          addBatch(product, Math.max(20, Math.floor(qty * 0.35)), producedAt, { directIssue: true });
+        } else if (roll < 0.22) {
+          addBatch(product, qty, producedAt, { shortBy: Math.max(1, Math.floor(qty * (0.02 + rand() * 0.06))) });
+        } else {
+          addBatch(product, qty, producedAt);
+        }
+      }
 
-  // --- Restock request: Admin noticed Cups running low and pushed a production ask ---
-  const r1 = {
-    id: uid('restock'), product: CUPS, qty: 50, remaining: 50,
-    requestedBy: 'Admin', createdAt: t(1.5), status: 'queued',
-  };
-  db.restocks.push(r1);
+      if (rand() < 0.34 && inv[product] > 15) {
+        const desired = rand() < 0.4 ? inv[product] : 15 + Math.floor(rand() * 90);
+        const qty = Math.min(desired, inv[product]);
+        if (qty > 0) {
+          const orderAt = dayStart + Math.floor(7 + rand() * 9) * H;
+          addOrder(pick(CUSTOMERS), [{ product, qty }], orderAt, {
+            status: 'shipped',
+            completedAt: orderAt + 3 * H,
+            completedBy: 'Admin',
+            shippedAt: orderAt + 26 * H,
+            shippedBy: 'Admin',
+          });
+        }
+      }
+    });
+  }
+
+  // --- Today / yesterday: the specific teaching examples referenced around the app ---
+  addBatch(BAGS, 200, t(47));                                            // clean batch
+  addBatch(CUPS, 150, t(40), { shortBy: 5 });                            // shrinkage: 150 made, 145 counted
+  addBatch(PLATES, 100, t(36));                                          // clean
+  addBatch(PLATES, 60, t(18));                                           // flagged redundant — stock already on hand
+  addBatch(CUPS, 80, t(20), { directIssue: true, customer: 'QuickServe Cafe' }); // bypassed inventory entirely
+  addBatch(GARBAGE, 300, t(10));
+  addBatch(LAUNDRY, 150, t(8));
+  addBatch(BAGS, 50, t(2), { inTransit: true });                         // still on its way to inventory right now
+
+  addOrder('GreenMart', [{ product: BAGS, qty: Math.min(120, inv[BAGS]) }], t(30), {
+    status: 'shipped', completedAt: t(29), completedBy: 'Admin', shippedAt: t(28), shippedBy: 'Admin',
+  });
+
+  addOrder('CityDiner', [{ product: CUPS, qty: inv[CUPS] + 55 }], t(3)); // deliberately short by 55, queued to the floor TV
+
+  addOrder('PackRight Distributors', [{ product: PLATES, qty: Math.min(30, inv[PLATES]) }], t(1), {
+    status: 'complete', completedAt: t(0.8), completedBy: 'Admin', shippedAt: null, shippedBy: null,
+  });
+
+  addOrder('EcoBags Retail', [                                          // multi-item cart, mixed fulfillment
+    { product: BAGS, qty: inv[BAGS] + 20 },                             // short by 20, queued
+    { product: PLATES, qty: Math.min(40, inv[PLATES]) },                // fully covered
+  ], t(0.5));
+
+  addRestock(CUPS, 50, 'Admin', t(1.5));                                 // internal restock ask, still open
 
   saveDB(db);
 }
